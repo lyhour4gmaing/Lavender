@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Data Table with Local Storage</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+    }
+
+    h2 {
+      margin-top: 40px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+      table-layout: auto;
+    }
+
+    th, td {
+      border: 1px solid #ccc;
+      padding: 8px 12px;
+      text-align: left;
+      word-break: break-word;
+    }
+
+    th {
+      background-color: #f0f0f0;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+
+    tr:nth-child(even) {
+      background-color: #fafafa;
+    }
+
+    tr:hover {
+      background-color: #f3f3f3;
+    }
+
+    .button-container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .button-container button {
+      padding: 10px 14px;
+      font-size: 16px;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background-color 0.3s ease;
+    }
+
+    .button-container button:hover {
+      background-color: #0056b3;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    #summaryTableHeader {
+      margin-top: 30px;
+    }
+  </style>
+</head>
+<body>
+  <h2>Main Data Table</h2>
+  <div class="button-container">
+    <button id="pasteButton">📋 Paste</button>
+    <button id="summaryButton">🔍 Toggle Summary</button>
+    <button id="copyTableButton">📄 Copy Table</button>
+    <button id="syncButton">🔄 Sync</button>
+    <button id="clearDataButton">🧹 Clear All</button>
+  </div>
+
+  <table id="dataTable" class="hidden">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Date & Time</th>
+        <th>Store</th>
+        <th>Amount</th>
+        <th>Brand</th>
+        <th>Code</th>
+        <th>Product ID</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <h2 id="summaryTableHeader">Filtered Summary by Code</h2>
+  <table id="summaryTable">
+    <thead>
+      <tr>
+        <th>Code</th>
+        <th>Brand</th>
+        <th>Total Amount</th>
+        <th>Total Unique IDs</th>
+        <th>Product ID</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <script>
+    const tableBody = document.querySelector('#dataTable tbody');
+    const summaryTableBody = document.querySelector('#summaryTable tbody');
+    const pasteButton = document.getElementById('pasteButton');
+    const summaryButton = document.getElementById('summaryButton');
+    const copyTableButton = document.getElementById('copyTableButton');
+    const syncButton = document.getElementById('syncButton');
+    const clearDataButton = document.getElementById('clearDataButton');
+
+    function saveData() {
+      localStorage.setItem('mainTableData', tableBody.innerHTML);
+    }
+
+    function loadData() {
+      const saved = localStorage.getItem('mainTableData');
+      if (saved) {
+        tableBody.innerHTML = saved;
+        generateSummary();
+      }
+    }
+
+    function generateSummary() {
+      requestIdleCallback(() => {
+        const seen = new Set();
+        const summary = new Map();
+        summaryTableBody.innerHTML = '';
+
+        tableBody.querySelectorAll('tr').forEach(row => {
+          const cells = row.querySelectorAll('td');
+          if (cells.length < 7) return;
+
+          const id = cells[0].textContent.trim();
+          const amount = parseFloat(cells[3].textContent.replace(/,/g, '')) || 0;
+          const brand = cells[4].textContent.trim();
+          const code = cells[5].textContent.trim();
+          const productID = cells[6].textContent.trim();
+
+          if (code.length !== 15 || seen.has(id)) return;
+          seen.add(id);
+
+          if (!summary.has(code)) {
+            summary.set(code, { brand, totalAmount: 0, totalUnique: 0, productID });
+          }
+
+          const item = summary.get(code);
+          item.totalAmount += amount;
+          item.totalUnique += 1;
+        });
+
+        const frag = document.createDocumentFragment();
+        for (const [code, data] of summary.entries()) {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td>${code}</td>
+            <td>${data.brand}</td>
+            <td>${data.totalAmount.toLocaleString()}</td>
+            <td>${data.totalUnique}</td>
+            <td>${data.productID}</td>
+          `;
+          frag.appendChild(tr);
+        }
+        summaryTableBody.appendChild(frag);
+      });
+    }
+
+    pasteButton.addEventListener('click', async () => {
+      try {
+        const text = await navigator.clipboard.readText();
+        const rows = text.trim().split('\n');
+        const frag = document.createDocumentFragment();
+
+        rows.forEach(row => {
+          const cols = row.split(/\t| {2,}/);
+          if (cols.length < 7) return;
+          const tr = document.createElement('tr');
+          cols.forEach(cell => {
+            const td = document.createElement('td');
+            td.textContent = cell.trim();
+            tr.appendChild(td);
+          });
+          frag.appendChild(tr);
+        });
+
+        tableBody.appendChild(frag);
+        saveData();
+        generateSummary();
+        pasteButton.textContent = '✅';
+        setTimeout(() => pasteButton.textContent = '📋 Paste', 1500);
+      } catch (err) {
+        console.error('Paste failed:', err);
+        pasteButton.textContent = '❌';
+        setTimeout(() => pasteButton.textContent = '📋 Paste', 1500);
+      }
+    });
+
+    copyTableButton.addEventListener('click', () => {
+      const rows = [];
+      const headers = [...document.querySelectorAll('#dataTable thead th')].map(th => th.textContent);
+      rows.push(headers.join('\t'));
+
+      tableBody.querySelectorAll('tr').forEach(tr => {
+        const cells = [...tr.querySelectorAll('td')].map(td => td.textContent);
+        rows.push(cells.join('\t'));
+      });
+
+      navigator.clipboard.writeText(rows.join('\n')).then(() => {
+        copyTableButton.textContent = '✅';
+        setTimeout(() => copyTableButton.textContent = '📄 Copy Table', 1500);
+      }).catch(() => {
+        copyTableButton.textContent = '❌';
+        setTimeout(() => copyTableButton.textContent = '📄 Copy Table', 1500);
+      });
+    });
+
+    syncButton.addEventListener('click', () => {
+      const seen = new Set();
+      const rows = Array.from(tableBody.children);
+      tableBody.innerHTML = '';
+      const frag = document.createDocumentFragment();
+
+      rows.forEach(tr => {
+        const id = tr.querySelector('td')?.textContent.trim();
+        if (id && !seen.has(id)) {
+          seen.add(id);
+          frag.appendChild(tr);
+        }
+      });
+
+      tableBody.appendChild(frag);
+      saveData();
+      generateSummary();
+      syncButton.textContent = '✅';
+      setTimeout(() => syncButton.textContent = '🔄 Sync', 1500);
+    });
+
+    summaryButton.addEventListener('click', () => {
+      document.getElementById('dataTable').classList.toggle('hidden');
+      document.getElementById('summaryTable').classList.toggle('hidden');
+    });
+
+    clearDataButton.addEventListener('click', () => {
+      if (confirm('Are you sure you want to clear all data?')) {
+        tableBody.innerHTML = '';
+        summaryTableBody.innerHTML = '';
+        localStorage.removeItem('mainTableData');
+      }
+    });
+
+    window.addEventListener('load', loadData);
+  </script>
+</body>
+</html>
